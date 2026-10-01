@@ -1,0 +1,5 @@
+streamlit
+pandas
+gspread>=6.0.0
+google-auth>=2.0.0
+reportlab>=4.0.0

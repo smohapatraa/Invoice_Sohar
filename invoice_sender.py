@@ -94,7 +94,7 @@ def get_spreadsheet():
     return get_gspread_client().open_by_key(st.secrets["spreadsheet_id"])
 
 # ------------------------------------------------------------
-# CELL MAPPING — Simple Mode
+# CELL MAPPING (Simple Mode)
 # ------------------------------------------------------------
 CELL_MAP = {"q1": "Q1", "q3": "Q3"}
 
@@ -143,6 +143,14 @@ def read_range(sheet_name, cell_range):
         st.warning(f"Could not read {cell_range} from {sheet_name}: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=15, show_spinner=False)
+def get_sheet_gid(sheet_name):
+    try:
+        ws = get_spreadsheet().worksheet(sheet_name)
+        return ws.id
+    except Exception:
+        return None
+
 # ------------------------------------------------------------
 # WRITE HELPERS
 # ------------------------------------------------------------
@@ -176,7 +184,7 @@ def delete_sheet(sheet_name):
     ss.del_worksheet(ws)
 
 # ============================================================
-# PDF GENERATION
+# PDF GENERATION (ReportLab — plain)
 # ============================================================
 def build_pdf(sheet_name, df):
     buffer = io.BytesIO()
@@ -255,7 +263,7 @@ def is_valid_email(email):
     return re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email) is not None
 
 # ============================================================
-# UI
+# UI HEADER
 # ============================================================
 col_head1, col_head2 = st.columns([4, 1])
 with col_head1:
@@ -268,7 +276,9 @@ with col_head2:
 
 st.divider()
 
-# Sidebar — sheet info
+# ------------------------------------------------------------
+# SIDEBAR
+# ------------------------------------------------------------
 with st.sidebar:
     st.header("📊 Sheet Info")
     sheet_names = list_sheet_names()
@@ -283,9 +293,9 @@ if not sheet_names:
     st.error("No sheets found. Verify spreadsheet ID and sharing.")
     st.stop()
 
-# ------------------------------------------------------------
-# TWO TABS
-# ------------------------------------------------------------
+# ============================================================
+# TABS
+# ============================================================
 tab_dup, tab_pdf = st.tabs(["📋 Duplicate Sheet", "📄 Print PDF Invoice"])
 
 # ============================================================
@@ -371,7 +381,7 @@ with tab_dup:
 # TAB 2: PRINT PDF INVOICE
 # ============================================================
 with tab_pdf:
-    st.subheader("📄 Invoice Preview & Send")
+    st.subheader("📄 Invoice Preview & Print")
 
     col_pdf1, col_pdf2 = st.columns([3, 1])
 
@@ -393,12 +403,165 @@ with tab_pdf:
         st.warning("No data in the selected range")
     else:
         st.caption(f"Showing **{len(invoice_df)} rows × {len(invoice_df.columns)} columns**")
-        st.dataframe(invoice_df, use_container_width=True, height=500, hide_index=True)
+        st.dataframe(invoice_df, use_container_width=True, height=400, hide_index=True)
 
+        # =====================================================
+        # BUILD URLS
+        # =====================================================
+        try:
+            ss = get_spreadsheet()
+            sheet_ws = ss.worksheet(selected_sheet)
+            sheet_gid = sheet_ws.id
+            spreadsheet_id = st.secrets["spreadsheet_id"]
+
+            encoded_range = cell_range.replace(":", "%3A")
+
+            pdf_export_url = (
+                f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export"
+                f"?format=pdf"
+                f"&size=A4"
+                f"&portrait=true"
+                f"&fitw=true"
+                f"&gridlines=false"
+                f"&printtitle=false"
+                f"&sheetnames=false"
+                f"&pagenum=UNDEFINED"
+                f"&horizontal_alignment=CENTER"
+                f"&vertical_alignment=TOP"
+                f"&fzr=true"
+                f"&fzc=true"
+                f"&gid={sheet_gid}"
+                f"&range={encoded_range}"
+            )
+
+            edit_url = (
+                f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+                f"/edit#gid={sheet_gid}&range={cell_range}"
+            )
+
+        except Exception as e:
+            st.error(f"Could not build URLs: {e}")
+            st.stop()
+
+        # =====================================================
+        # ANDROID PRINT WORKFLOW
+        # =====================================================
         st.divider()
-        st.subheader("📧 Send as PDF")
+        st.markdown("### 📱 Print from Android — 3 Easy Steps")
 
-        # Load email config
+        st.markdown("""
+        <div style="background: #e8f5e9; padding: 12px 16px; border-radius: 10px;
+                    border-left: 5px solid #4caf50; margin-bottom: 12px;">
+            <b style="color: #2e7d32;">Step 1 — Open the PDF</b><br>
+            <span style="color: #555; font-size: 13px;">
+                Tap the button below. The PDF opens in a new tab with all
+                formatting, colors, and images intact.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.link_button(
+            "🖨️ Open Pixel-Perfect PDF (matches Ctrl+P)",
+            pdf_export_url,
+            use_container_width=True,
+            type="primary"
+        )
+
+        st.markdown("""
+        <div style="background: #fff3e0; padding: 12px 16px; border-radius: 10px;
+                    border-left: 5px solid #ff9800; margin-top: 16px; margin-bottom: 12px;">
+            <b style="color: #e65100;">Step 2 — In Chrome, tap Share → Print</b><br>
+            <span style="color: #555; font-size: 13px;">
+                The PDF opens in Chrome. Look for the <b>Share icon</b> at the top
+                or tap the <b>⋮ menu → Share → Print</b>.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style="background: #e3f2fd; padding: 12px 16px; border-radius: 10px;
+                    border-left: 5px solid #2196f3;">
+            <b style="color: #0d47a1;">Step 3 — Choose your printer</b><br>
+            <span style="color: #555; font-size: 13px;">
+                Android's print dialog appears. Select your printer and print.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # =====================================================
+        # OTHER OPTIONS
+        # =====================================================
+        st.divider()
+        st.markdown("### 🔄 Other Options")
+
+        col_alt1, col_alt2 = st.columns(2)
+
+        with col_alt1:
+            st.link_button(
+                "📊 Open in Google Sheets",
+                edit_url,
+                use_container_width=True
+            )
+            st.caption("Edit the sheet before printing")
+
+        with col_alt2:
+            st.link_button(
+                "📥 Download PDF Directly",
+                pdf_export_url,
+                use_container_width=True
+            )
+            st.caption("Saves to Downloads folder")
+
+        # =====================================================
+        # INSTRUCTIONS
+        # =====================================================
+        with st.expander("📖 Detailed Android Print Instructions"):
+            st.markdown("""
+            ### How to Print the Invoice from Android
+
+            **Option A — Print Directly from Chrome**
+            1. Tap **"🖨️ Open Pixel-Perfect PDF"** above
+            2. Chrome opens the PDF in a new tab
+            3. Tap the **Share icon** (📤) at the top right  
+               *(or tap ⋮ menu → Share)*
+            4. Tap **Print**
+            5. Android's print dialog appears
+            6. Select your printer (or "Save as PDF")
+            7. Tap **Print**
+
+            **Option B — Save Then Print**
+            1. Tap **"📥 Download PDF Directly"** above
+            2. The PDF downloads to your **Downloads** folder
+            3. Open **Files** app → Downloads → tap the PDF
+            4. Tap the **⋮ menu → Print**
+            5. Select printer → Print
+
+            **Option C — Send via Email Then Print**
+            1. Open the PDF using Option A
+            2. Tap **Share** → **Gmail**
+            3. Send to your own email
+            4. Open the email on your phone
+            5. Tap the attachment → Print
+
+            ---
+
+            ### Why 3 Taps?
+            Android and Chrome don't allow any web app to open the print dialog
+            automatically — for security. The 3-tap workflow above is the
+            minimum possible on Android.
+            """)
+
+        # =====================================================
+        # REPORTLAB PDF + EMAIL
+        # =====================================================
+        st.divider()
+        st.markdown("### 📧 Send PDF by Email")
+
+        st.caption(
+            "Sends a **plain-text PDF** (no images/colors) as an email attachment. "
+            "Use this when you need to programmatically email the invoice."
+        )
+
         try:
             default_email = st.secrets.get("DEFAULT_EMAIL", "")
             smtp_email = st.secrets.get("SMTP_EMAIL", "")
@@ -427,7 +590,7 @@ with tab_pdf:
                 "Message",
                 value=f"Please find attached the invoice.\n\nGenerated on "
                       f"{_ist_now().strftime('%d-%b-%Y %H:%M')} IST",
-                height=100
+                height=80
             )
 
             col_send, col_download = st.columns([1, 1])
@@ -438,10 +601,9 @@ with tab_pdf:
                                                       type="primary")
 
             with col_download:
-                gen_download = st.form_submit_button("📥 Generate PDF (Download)",
+                gen_download = st.form_submit_button("📥 Generate PDF for Download",
                                                       use_container_width=True)
 
-        # Generate for download
         if gen_download:
             with st.spinner("Generating PDF..."):
                 try:
@@ -454,14 +616,13 @@ with tab_pdf:
 
         if "pdf_bytes" in st.session_state:
             st.download_button(
-                "📥 Click to Download PDF",
+                "📥 Click to Download ReportLab PDF",
                 data=st.session_state["pdf_bytes"],
                 file_name=st.session_state.get("pdf_filename", "invoice.pdf"),
                 mime="application/pdf",
                 use_container_width=True
             )
 
-        # Send email
         if send_clicked:
             if not is_valid_email(to_email):
                 st.error("❌ Invalid email address")
@@ -485,5 +646,8 @@ with tab_pdf:
                     except Exception as e:
                         st.error(f"❌ Failed: {e}")
 
+# ------------------------------------------------------------
+# FOOTER
+# ------------------------------------------------------------
 st.divider()
 st.caption("🛠️ Sheet Tools · Built by S. Mohapatra")
